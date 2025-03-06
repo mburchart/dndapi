@@ -1,0 +1,15 @@
+services:
+    postgres:
+        build: ./postgres          
+        restart: unless-stopped
+        hostname: postgres
+        expose:
+            - "5432"
+        ports:
+            - "127.0.0.1:5432:5432"
+        volumes:
+            - ./data/postgresql:/var/lib/postgresql/data:rw
+        environment:            
+            - POSTGRES_USER=${POSTGRESQL_USERNAME}
+            - POSTGRES_PASSWORD=${POSTGRESQL_PASSWORD}
+            - POSTGRES_DB=${POSTGRESQL_DB}
