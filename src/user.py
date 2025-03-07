@@ -168,7 +168,7 @@ class Validate:
 @router.put("/user")
 async def create_user(req_user: Annotated[User, Depends(User.login)], username: str, firstname: str, lastname: str, email: str, is_admin: bool, password: str):
     try:     
-        if req_user.has_permission("create_users") == False:
+        if req_user.has_permission("usermanagement") == False:
             raise HTTPException(status_code=403, detail="Permission denied")   
         username = Validate.username(username)
         firstname = Validate.firstname(firstname)
@@ -193,7 +193,7 @@ async def update_user(req_user: Annotated[User, Depends(User.login)], user_id: O
     if user_id == None:
         user = req_user
     else:
-        if req_user.has_permission("modify_users") == False:
+        if req_user.has_permission("usermanagement") == False:
             raise HTTPException(status_code=403, detail="Permission denied")
         user = await User.get_by_id(user_id)
     if not user:
@@ -229,7 +229,7 @@ async def get_my_user(user: Annotated[User, Depends(User.login)]):
 
 @router.get("/user/{user_id}")
 async def get_user(req_user: Annotated[User, Depends(User.login)], user_id: int):
-    if req_user.has_permission("view_users") == False:
+    if req_user.has_permission("usermanagement") == False:
         raise HTTPException(status_code=403, detail="Permission denied")
     user = await User.get_by_id(user_id)
     if not user:
@@ -237,12 +237,16 @@ async def get_user(req_user: Annotated[User, Depends(User.login)], user_id: int)
     return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "is_admin": user.is_admin, "created_at": user.created_at, "modified_at": user.modified_at, "last_login": user.last_login}
 
 @router.get("/users")
-async def get_list_of_all_users():
-    users = await (await PostgresDB.get_instance()).fetch("SELECT id, username, firstname, lastname, email, is_admin, created_at, modified_at, last_login FROM users")
+async def get_list_of_all_users(req_user: Annotated[User, Depends(User.login)]):
+    if req_user.has_permission("usermanagement") == False:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    users = await (await PostgresDB.get_instance()).fetch("SELECT id, username, firstname, lastname, email, is_admin, created_at, modified_at, last_login FROM users ORDER BY id ASC")
     return users
 
 @router.delete("/user/{user_id}")
-async def delete_user(user_id: int):
+async def delete_user(req_user: Annotated[User, Depends(User.login)], user_id: int):
+    if req_user.has_permission("usermanagement") == False:
+        raise HTTPException(status_code=403, detail="Permission denied")
     user = await User.get_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -271,3 +275,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 async def get_permissions(user: Annotated[User, Depends(User.login)]):
     data = await (await PostgresDB.get_instance()).fetch("SELECT permission_key FROM users_permissions WHERE user_id = $1", user.id)
     return [row[0] for row in data]
+
+@router.get("/permission/{permission_key}")
+async def check_permission(user: Annotated[User, Depends(User.login)], permission_key: str):
+    return await user.has_permission(permission_key)
