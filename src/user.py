@@ -8,6 +8,7 @@ from typing import Annotated
 from pydantic import BaseModel, EmailStr, field_validator, ValidationError
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
+from logger import Logger
 import re
 import jwt
 
@@ -24,14 +25,16 @@ class TokenData(BaseModel):
 
 class User:      
     
-    def __init__(self, id: int, username: str, firstname: str, lastname: str, email: str, password: str, created_at: str, last_login: Optional[str] = None):
+    def __init__(self, id: int, username: str, firstname: str, lastname: str, email: str, is_admin: bool, password: str, created_at: datetime, modified_at: datetime, last_login: Optional[datetime] = None):
         self.id = id
         self.username = username
         self.email = email
+        self.is_admin = is_admin
         self.firstname = firstname
         self.lastname = lastname
         self._password = password
         self.created_at = created_at
+        self.modified_at = modified_at
         self.last_login = last_login
     
     @property
@@ -61,15 +64,15 @@ class User:
         return User(*data) if data else None
     
     @staticmethod
-    async def create(username: str, firstname: str, lastname: str, email: str, password: str) -> 'User':
-        query = "INSERT INTO users (username, firstname, lastname, email, pw) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at, last_login"
+    async def create(username: str, firstname: str, lastname: str, email: str, is_admin: bool, password: str) -> 'User':
+        query = "INSERT INTO users (username, firstname, lastname, email, is_admin, pw) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at, modified_at, last_login"
         password = User.hash_password(password)
-        data = await (await PostgresDB.get_instance()).fetch_one(query, username, firstname, lastname, email, password)
-        return User(data[0], username, firstname, lastname, email, password, data[1], data[2]) if data else None
+        data = await (await PostgresDB.get_instance()).fetch_one(query, username, firstname, lastname, email, is_admin, password)
+        return User(data[0], username, firstname, lastname, email, password, data[1], data[2], data[3]) if data else None
     
     async def update(self):
-        query = "UPDATE users SET username = $1, firstname = $2, lastname = $3, email = $4, pw = $5, last_login = $6 WHERE id = $7"
-        await (await PostgresDB.get_instance()).execute(query, self.username, self.firstname, self.lastname, self.email, self._password, self.last_login, self.id)
+        query = "UPDATE users SET username = $1, firstname = $2, lastname = $3, email = $4, is_admin = $5, pw = $6, modified_at = $7, last_login = $8 WHERE id = $9"
+        await (await PostgresDB.get_instance()).execute(query, self.username, self.firstname, self.lastname, self.email, self.is_admin, self._password, datetime.now(timezone.utc), self.last_login, self.id)
 
     async def delete(self):
         query = "DELETE FROM users WHERE id = $1"
@@ -91,7 +94,7 @@ class User:
         )
         try:
             payload = jwt.decode(token, Config.get_instance().oauth2['secret_key'], algorithms=[Config.get_instance().oauth2['algorithm']])
-            user_id = payload.get("id")
+            user_id = payload.get("user_id")
             if user_id is None:
                 raise credentials_exception
             token_data = TokenData(user_id=user_id)
@@ -114,6 +117,13 @@ class User:
         to_encode.update({"exp": expire})
         encoded_jwt = jwt.encode(to_encode, Config.get_instance().oauth2['secret_key'], algorithm=Config.get_instance().oauth2['algorithm'])
         return encoded_jwt
+    
+    async def has_permission(self, key: str) -> bool:
+        if self.is_admin:
+            return True
+        query = "SELECT COUNT(id) FROM users_permissions WHERE user_id = $1 AND permission_key = $2 LIMIT 1"
+        data = await (await PostgresDB.get_instance()).fetch_one(query, self.id, key)
+        return data[0] > 0
 
 class Validate:
     @staticmethod
@@ -156,7 +166,7 @@ class Validate:
         return value
 
 @router.put("/user")
-async def create_user(username: str, firstname: str, lastname: str, email: str, password: str, user: Annotated[User, Depends(User.login)],):
+async def create_user(username: str, firstname: str, lastname: str, email: str, is_admin: bool, password: str, user: Annotated[User, Depends(User.login)],):
     try:        
         username = Validate.username(username)
         firstname = Validate.firstname(firstname)
@@ -169,15 +179,15 @@ async def create_user(username: str, firstname: str, lastname: str, email: str, 
         check_email = await User.get_by_email(email)
         if check_email:
             raise HTTPException(status_code=400, detail="Email already exists")        
-        user = await User.create(username, firstname, lastname, email, password)
-        return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "created_at": user.created_at, "last_login": user.last_login}
+        user = await User.create(username, firstname, lastname, email, is_admin, password)
+        return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "is_admin": user.is_admin, "created_at": user.created_at, "modified_at": user.modified_at, "last_login": user.last_login}
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=e.errors())    
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
 @router.patch("/user/{user_id}")
-async def update_user(user_id: int, username: Optional[str] = None, firstname: Optional[str] = None, lastname: Optional[str] = None, email: Optional[str] = None, password: Optional[str] = None):
+async def update_user(user_id: int, username: Optional[str] = None, firstname: Optional[str] = None, lastname: Optional[str] = None, email: Optional[str] = None, is_admin: Optional[bool] = None, password: Optional[str] = None):
     user = await User.get_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")    
@@ -199,23 +209,25 @@ async def update_user(user_id: int, username: Optional[str] = None, firstname: O
         user.email = email        
     if password:
         user.password = Validate.password(password)
-        
+    if is_admin is not None and (is_admin == True or is_admin == False):
+        user.is_admin = is_admin
+    user.modified_at = datetime.now(timezone.utc)        
     await user.update()
-    return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "created_at": user.created_at, "last_login": user.last_login}
+    return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "is_admin": user.is_admin, "created_at": user.created_at, "modified_at": user.modified_at, "last_login": user.last_login}
     
 
 @router.get("/user/me")
 async def get_my_user(user: Annotated[User, Depends(User.login)]):
-    return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "created_at": user.created_at, "last_login": user.last_login}
+    return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "is_admin": user.is_admin, "created_at": user.created_at, "modified_at": user.modified_at, "last_login": user.last_login}
 
 @router.get("/user/{user_id}")
 async def get_user(user_id: int):
     user = await User.get_by_id(user_id)
-    return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "created_at": user.created_at, "last_login": user.last_login}
+    return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "is_admin": user.is_admin, "created_at": user.created_at, "modified_at": user.modified_at, "last_login": user.last_login}
 
 @router.get("/users")
 async def get_list_of_all_users():
-    users = await (await PostgresDB.get_instance()).fetch("SELECT id, username, firstname, lastname, email, created_at, last_login FROM users")
+    users = await (await PostgresDB.get_instance()).fetch("SELECT id, username, firstname, lastname, email, is_admin, created_at, modified_at, last_login FROM users")
     return users
 
 @router.delete("/user/{user_id}")
@@ -241,5 +253,9 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             detail="Invalid username or password"
         )    
     access_token_expires = timedelta(minutes=Config.get_instance().oauth2['access_token_expire_minutes'])
-    access_token = User.create_access_token(data={"id": user.id}, expires_delta=access_token_expires)
+    access_token = User.create_access_token(data={"user_id": user.id}, expires_delta=access_token_expires)
     return Token(access_token=access_token, token_type="bearer")
+
+@router.get("/user/permission")
+async def has_permission(user: Annotated[User, Depends(User.login)], key: str):
+    return await user.has_permission(key)
