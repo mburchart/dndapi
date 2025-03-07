@@ -68,7 +68,7 @@ class User:
         query = "INSERT INTO users (username, firstname, lastname, email, is_admin, pw) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at, modified_at, last_login"
         password = User.hash_password(password)
         data = await (await PostgresDB.get_instance()).fetch_one(query, username, firstname, lastname, email, is_admin, password)
-        return User(data[0], username, firstname, lastname, email, password, data[1], data[2], data[3]) if data else None
+        return User(data[0], username, firstname, lastname, email, is_admin, password, data[1], data[2], data[3]) if data else None
     
     async def update(self):
         query = "UPDATE users SET username = $1, firstname = $2, lastname = $3, email = $4, is_admin = $5, pw = $6, modified_at = $7, last_login = $8 WHERE id = $9"
@@ -118,11 +118,11 @@ class User:
         encoded_jwt = jwt.encode(to_encode, Config.get_instance().oauth2['secret_key'], algorithm=Config.get_instance().oauth2['algorithm'])
         return encoded_jwt
     
-    async def has_permission(self, key: str) -> bool:
+    async def has_permission(self, permission_key: str) -> int:
         if self.is_admin:
             return True
         query = "SELECT COUNT(id) FROM users_permissions WHERE user_id = $1 AND permission_key = $2 LIMIT 1"
-        data = await (await PostgresDB.get_instance()).fetch_one(query, self.id, key)
+        data = await (await PostgresDB.get_instance()).fetch_one(query, self.id, permission_key)
         return data[0] > 0
 
 class Validate:
@@ -166,8 +166,10 @@ class Validate:
         return value
 
 @router.put("/user")
-async def create_user(username: str, firstname: str, lastname: str, email: str, is_admin: bool, password: str, user: Annotated[User, Depends(User.login)],):
-    try:        
+async def create_user(req_user: Annotated[User, Depends(User.login)], username: str, firstname: str, lastname: str, email: str, is_admin: bool, password: str):
+    try:     
+        if req_user.has_permission("create_users") == False:
+            raise HTTPException(status_code=403, detail="Permission denied")   
         username = Validate.username(username)
         firstname = Validate.firstname(firstname)
         lastname = Validate.lastname(lastname)
@@ -186,9 +188,14 @@ async def create_user(username: str, firstname: str, lastname: str, email: str, 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     
-@router.patch("/user/{user_id}")
-async def update_user(user_id: int, username: Optional[str] = None, firstname: Optional[str] = None, lastname: Optional[str] = None, email: Optional[str] = None, is_admin: Optional[bool] = None, password: Optional[str] = None):
-    user = await User.get_by_id(user_id)
+@router.patch("/user")
+async def update_user(req_user: Annotated[User, Depends(User.login)], user_id: Optional[int] = None, username: Optional[str] = None, firstname: Optional[str] = None, lastname: Optional[str] = None, email: Optional[str] = None, is_admin: Optional[bool] = None, password: Optional[str] = None):    
+    if user_id == None:
+        user = req_user
+    else:
+        if req_user.has_permission("modify_users") == False:
+            raise HTTPException(status_code=403, detail="Permission denied")
+        user = await User.get_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")    
     if username:
@@ -221,8 +228,12 @@ async def get_my_user(user: Annotated[User, Depends(User.login)]):
     return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "is_admin": user.is_admin, "created_at": user.created_at, "modified_at": user.modified_at, "last_login": user.last_login}
 
 @router.get("/user/{user_id}")
-async def get_user(user_id: int):
+async def get_user(req_user: Annotated[User, Depends(User.login)], user_id: int):
+    if req_user.has_permission("view_users") == False:
+        raise HTTPException(status_code=403, detail="Permission denied")
     user = await User.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "is_admin": user.is_admin, "created_at": user.created_at, "modified_at": user.modified_at, "last_login": user.last_login}
 
 @router.get("/users")
@@ -256,6 +267,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     access_token = User.create_access_token(data={"user_id": user.id}, expires_delta=access_token_expires)
     return Token(access_token=access_token, token_type="bearer")
 
-@router.get("/user/permission")
-async def has_permission(user: Annotated[User, Depends(User.login)], key: str):
-    return await user.has_permission(key)
+@router.get("/permissions")
+async def get_permissions(user: Annotated[User, Depends(User.login)]):
+    data = await (await PostgresDB.get_instance()).fetch("SELECT permission_key FROM users_permissions WHERE user_id = $1", user.id)
+    return [row[0] for row in data]
