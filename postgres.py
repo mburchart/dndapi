@@ -1,5 +1,6 @@
 import asyncpg
 import os
+from config import Config
 
 class PostgresDB:
 
@@ -11,20 +12,12 @@ class PostgresDB:
         return cls._instance
     
     def __init__(self):
-        if not hasattr(self, "_config"):  # Damit `__init__` nur einmal ausgeführt wird
-            self._config = {
-                "host": os.getenv("DB_HOST", "localhost"),
-                "port": os.getenv("DB_PORT", "5432"),
-                "user": os.getenv("DB_USER", "postgres"),
-                "password": os.getenv("DB_PASSWORD", "password"),
-                "database": os.getenv("DB_NAME", "mydatabase")
-            }
         if not hasattr(self, "_pool"):
             self._pool = None
     
     async def connect(self):
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(**self._config, min_size=1, max_size=10)
+            self._pool = await asyncpg.create_pool(**Config.get_instance().postgres, min_size=1, max_size=10)
     
     async def disconnect(self):
         if self._pool is not None:
