@@ -240,6 +240,6 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             status_code=403,
             detail="Invalid username or password"
         )    
-    access_token_expires = timedelta(minutes=40)
+    access_token_expires = timedelta(minutes=Config.get_instance().oauth2['access_token_expire_minutes'])
     access_token = User.create_access_token(data={"id": user.id}, expires_delta=access_token_expires)
-    return Token(access_token=access_token, token_type="bearer")  
+    return Token(access_token=access_token, token_type="bearer")
