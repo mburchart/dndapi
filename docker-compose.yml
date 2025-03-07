@@ -10,6 +10,6 @@ services:
         volumes:
             - ./data/postgresql:/var/lib/postgresql/data:rw
         environment:            
-            - POSTGRES_USER=${POSTGRESQL_USERNAME}
-            - POSTGRES_PASSWORD=${POSTGRESQL_PASSWORD}
-            - POSTGRES_DB=${POSTGRESQL_DB}
+            - POSTGRES_USER=admin
+            - POSTGRES_PASSWORD=password
+            - POSTGRES_DB=dndapi

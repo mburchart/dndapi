@@ -17,15 +17,20 @@ class Config:
         self.postgres = {
             "host": os.getenv("DB_HOST", "localhost"),
             "port": os.getenv("DB_PORT", "5432"),
-            "user": os.getenv("DB_USER", "postgres"),
+            "user": os.getenv("DB_USER", "admin"),
             "password": os.getenv("DB_PASSWORD", "password"),
-            "database": os.getenv("DB_NAME", "mydatabase")
+            "database": os.getenv("DB_NAME", "dndapi")
         }
         self.logger = {
             "name": os.getenv("LOG_NAME", "AppLogger"),
             "file": os.getenv("LOG_FILE", "app.log"),
             "level": os.getenv("LOG_LEVEL", "DEBUG"),
             "path": os.getenv("LOG_PATH", "logs")
+        },
+        self.oauth2 = {
+            "secret_key": os.getenv("OAUTH2_SECRET_KEY", "mysecretkey"),
+            "algorithm": os.getenv("OAUTH2_ALGORITHM", "HS256"),
+            "access_token_expire_minutes": os.getenv("OAUTH2_ACCESS_TOKEN_EXPIRE_MINUTES", 30)
         }
     
     @staticmethod
