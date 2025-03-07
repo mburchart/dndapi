@@ -2,9 +2,8 @@
 
 ## Installation
 
-```` 
-pip install "fastapi[standard]" 
-pip install python-jose
-````
-
 ```` uvicorn main:app --reload ````
+
+## Update requirements.txt
+```` pip install pipreqs ````
+```` pipreqs . --force ````
