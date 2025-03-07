@@ -30,19 +30,19 @@ class User:
     @staticmethod
     async def get_by_email(email: str) -> Optional['User']:
         query = "SELECT id, username, email, pw, salt, created_at FROM users WHERE email = $1"
-        data = PostgresDB.fetch_one(query, email)
+        data = PostgresDB.get_instance().fetch_one(query, email)
         return User(*data) if data else None
     
     @staticmethod
     async def get_by_id(id: int) -> Optional['User']:
         query = "SELECT id, username, email, pw, salt, created_at FROM users WHERE id = $1"
-        data = PostgresDB.fetch_one(query, id)
+        data = PostgresDB.get_instance().fetch_one(query, id)
         return User(*data) if data else None
     
     @staticmethod
     async def get_by_username(username: str) -> Optional['User']:
         query = "SELECT id, username, email, pw, salt, created_at FROM users WHERE username = $1"
-        data = PostgresDB.fetch_one(query, username)
+        data = PostgresDB.get_instance().fetch_one(query, username)
         return User(*data) if data else None
     
     @staticmethod
@@ -50,16 +50,16 @@ class User:
         query = "INSERT INTO users (username, email, pw, salt) VALUES ($1, $2, $3, $4) RETURNING id, created_at"
         salt = User.generate_salt()
         password = User.hash_password(password, salt)
-        data = PostgresDB.fetch_one(query, username, email, password, salt)
+        data = PostgresDB.get_instance().fetch_one(query, username, email, password, salt)
         return User(data[0], username, email, password, salt, data[1]) if data else None
     
     async def update(self):
         query = "UPDATE users SET username = $1, email = $2, pw = $3, salt = $4 WHERE id = $5"
-        await PostgresDB.execute(query, self.username, self.email, self._password, self._salt, self.id)
+        await PostgresDB.get_instance().execute(query, self.username, self.email, self._password, self._salt, self.id)
 
     async def delete(self):
         query = "DELETE FROM users WHERE id = $1"
-        await PostgresDB.execute(query, self.id)
+        await PostgresDB.get_instance().execute(query, self.id)
 
     @staticmethod
     def generate_salt()-> str:

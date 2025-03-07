@@ -42,3 +42,9 @@ class PostgresDB:
     async def execute(self, query: str, *args):
         async with self._pool.acquire() as connection:
             return await connection.execute(query, *args)
+        
+    @staticmethod
+    def get_instance():
+        if PostgresDB._instance is None:
+            PostgresDB._instance = PostgresDB()
+        return PostgresDB._instance
