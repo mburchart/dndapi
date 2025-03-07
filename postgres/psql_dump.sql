@@ -8,3 +8,18 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_seen TIMESTAMP DEFAULT NULL
 );
+
+CREATE TABLE users_sessions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    access_token TEXT NOT NULL UNIQUE,
+    refresh_token TEXT UNIQUE,
+    token_type VARCHAR(20) DEFAULT 'bearer',
+    grant_type VARCHAR(50) NOT NULL,
+    scope TEXT DEFAULT 'read',
+    client_id TEXT,
+    client_secret TEXT,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used TIMESTAMP DEFAULT NULL
+);

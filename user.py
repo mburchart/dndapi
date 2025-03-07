@@ -1,13 +1,18 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from config import Config
 from postgres import PostgresDB
 from passlib.context import CryptContext
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from typing import Annotated
 from pydantic import BaseModel, EmailStr, field_validator, ValidationError
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jwt.exceptions import InvalidTokenError
 import re
+import jwt
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 class User:    
     
@@ -172,12 +177,86 @@ async def update_user(user_id: int, username: Optional[str] = None, firstname: O
     await user.update()
     return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "created_at": user.created_at, "last_seen": user.last_seen}
     
-@router.get("/users")
-async def get_users():
-    users = await (await PostgresDB.get_instance()).fetch("SELECT id, username, firstname, lastname, email, created_at, last_seen FROM users")
-    return users
+
+class TokenData(BaseModel):
+    user_id: int | None = None
+
+async def get_user(token: Annotated[str, Depends(oauth2_scheme)]):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, Config.get_instance().oauth2['secret_key'], algorithms=[Config.get_instance().oauth2['algorithm']])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+        token_data = TokenData(user_id=user_id)
+    except InvalidTokenError:
+        raise credentials_exception
+    user = await User.get_by_id(token_data.user_id)
+    if user is None:
+        raise credentials_exception
+    return user
+
+@router.get("/user/me")
+async def get_my_user(
+    user: Annotated[User, Depends(get_user)],
+):
+    return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "created_at": user.created_at, "last_seen": user.last_seen}
 
 @router.get("/user/{user_id}")
 async def get_user(user_id: int):
     user = await User.get_by_id(user_id)
     return {"id": user.id, "username": user.username, "firstname": user.firstname, "lastname": user.lastname, "email": user.email, "created_at": user.created_at, "last_seen": user.last_seen}
+
+@router.get("/users")
+async def get_list_of_all_users():
+    users = await (await PostgresDB.get_instance()).fetch("SELECT id, username, firstname, lastname, email, created_at, last_seen FROM users")
+    return users
+
+@router.delete("/user/{user_id}")
+async def delete_user(user_id: int):
+    user = await User.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    await user.delete()
+    return {"message": "User deleted successfully"}
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, Config.get_instance().oauth2['secret_key'], algorithm=Config.get_instance().oauth2['algorithm'])
+    return encoded_jwt
+
+@router.post("/token")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = await User.get_by_username(form_data.username)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    if not user.validate_password(form_data.password):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid username or password"
+        )
+    
+    access_token_expires = timedelta(minutes=40)
+    access_token = create_access_token(
+        data={"sub": user.id}, expires_delta=access_token_expires
+    )
+
+    return Token(access_token=access_token, token_type="bearer")  
