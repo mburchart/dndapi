@@ -1,16 +1,26 @@
 import asyncpg
+import os
 
 class PostgresDB:
+
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
-    def __init__(self, host: str, port: str, user: str, password: str, database: str):
-        self._config = {
-            "host": host,
-            "port": port,
-            "user": user,
-            "database": database,
-            "password": password
-        }
-        self._pool = None
+    def __init__(self):
+        if not hasattr(self, "_config"):  # Damit `__init__` nur einmal ausgeführt wird
+            self._config = {
+                "host": os.getenv("DB_HOST", "localhost"),
+                "port": os.getenv("DB_PORT", "5432"),
+                "user": os.getenv("DB_USER", "postgres"),
+                "password": os.getenv("DB_PASSWORD", "password"),
+                "database": os.getenv("DB_NAME", "mydatabase")
+            }
+        if not hasattr(self, "_pool"):
+            self._pool = None
     
     async def connect(self):
         if self._pool is None:
