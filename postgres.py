@@ -37,7 +37,8 @@ class PostgresDB:
             return await connection.execute(query, *args)
         
     @staticmethod
-    def get_instance():
+    async def get_instance():
         if PostgresDB._instance is None:
             PostgresDB._instance = PostgresDB()
+            await PostgresDB._instance.connect()
         return PostgresDB._instance
