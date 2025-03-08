@@ -31,6 +31,9 @@ class Config:
             "secret_key": os.getenv("OAUTH2_SECRET_KEY", "mysecretkey"),
             "algorithm": os.getenv("OAUTH2_ALGORITHM", "HS256"),
             "access_token_expire_minutes": os.getenv("OAUTH2_ACCESS_TOKEN_EXPIRE_MINUTES", 30)
+        },
+        permission_keys = {
+            "user_management": "user_management",
         }
     
     @staticmethod
